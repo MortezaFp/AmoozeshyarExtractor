@@ -1,0 +1,15 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+
+# Generated outputs (do not track)
+*.xlsx
+*.pdf
+
+# OS files
+Thumbs.db
+.DS_Store
