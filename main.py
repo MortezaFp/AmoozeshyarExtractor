@@ -570,19 +570,14 @@ EXTRACT_TABLE_JS = r"""
     for (let i = headerPos + 1; i < allRows.length; i++) {
         const tr = allRows[i];
         const cellsRaw = [...tr.querySelectorAll('td')].map((c) => clean(c.innerText || c.textContent || ''));
-        if (cellsRaw.length < headerIndexes.length) continue;
         if (cellsRaw.some((v) => /نتايج\s*جستجو|کلیه\s*حقوق/i.test(v))) continue;
-
-        const hasSerial = cellsRaw.some((v) => /^\d+$/.test(v || ''));
-        const hasCourseCode = cellsRaw.some((v) => /^\d{4,}$/.test(v || ''));
-        if (!hasSerial || !hasCourseCode) continue;
 
         const obj = {};
         let nonEmpty = 0;
         for (let c = 0; c < headerIndexes.length; c++) {
             const idx = headerIndexes[c];
             const key = headers[c];
-            const value = cellsRaw[idx] || '';
+            const value = idx < cellsRaw.length ? (cellsRaw[idx] || '') : '';
             obj[key] = value;
             if (value) nonEmpty += 1;
         }
@@ -914,6 +909,49 @@ def scrape_all_pages(page) -> list[dict]:
     collected_rows: list[dict] = []
     seen_pages: set[str] = set()
     empty_pages = 0
+    last_page_info = ""
+
+    def expected_rows_from_page_info(page_info: str) -> int | None:
+        if not page_info:
+            return None
+        match = re.search(r"ركورد\s*(\d+)\s*تا\s*(\d+)\s*از", page_info)
+        if not match:
+            return None
+        start_num = int(match.group(1))
+        end_num = int(match.group(2))
+        if end_num < start_num:
+            return None
+        return (end_num - start_num) + 1
+
+    def extract_with_retry(previous_page_info: str = "") -> dict:
+        best_extracted = {"headers": [], "rows": [], "pageInfo": ""}
+        best_row_count = -1
+        deadline = time.time() + 35
+        while time.time() < deadline:
+            extracted_local = page.evaluate(EXTRACT_TABLE_JS)
+            page_info_local = (extracted_local.get("pageInfo") or "").strip()
+            rows_local = extracted_local.get("rows") or []
+            row_count_local = len(rows_local)
+
+            if row_count_local > best_row_count:
+                best_row_count = row_count_local
+                best_extracted = extracted_local
+
+            if previous_page_info and page_info_local == previous_page_info:
+                page.wait_for_timeout(350)
+                continue
+
+            expected_rows = expected_rows_from_page_info(page_info_local)
+
+            if expected_rows is not None:
+                if row_count_local >= expected_rows:
+                    return extracted_local
+            elif row_count_local > 0:
+                return extracted_local
+
+            page.wait_for_timeout(350)
+
+        return best_extracted
 
     while True:
         if is_session_expired(page):
@@ -922,7 +960,7 @@ def scrape_all_pages(page) -> list[dict]:
             )
             break
 
-        extracted = page.evaluate(EXTRACT_TABLE_JS)
+        extracted = extract_with_retry(last_page_info)
         page_info = (extracted.get("pageInfo") or "").strip()
         rows = extracted.get("rows") or []
 
@@ -930,6 +968,7 @@ def scrape_all_pages(page) -> list[dict]:
             break
         if page_info:
             seen_pages.add(page_info)
+            last_page_info = page_info
 
         collected_rows.extend(rows)
         print(f"Collected rows: {len(collected_rows)}")
@@ -951,7 +990,8 @@ def scrape_all_pages(page) -> list[dict]:
         if not clicked:
             break
 
-        page.wait_for_timeout(1800)
+        # Wait for next page data to be fully rendered before next extraction pass.
+        page.wait_for_timeout(600)
 
     return collected_rows
 
