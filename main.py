@@ -228,6 +228,13 @@ def normalize_header_key(value) -> str:
     return normalize_persian_for_sort(value).replace(" ", "")
 
 
+def reverse_dataframe_columns(df):
+    columns = list(df.columns)
+    if len(columns) <= 1:
+        return df
+    return df[columns[::-1]].copy()
+
+
 def rtl_paragraph(
     value,
     style,
@@ -457,6 +464,9 @@ def postprocess_excel_to_pdfs(
 
     group_df = group_df.fillna("").reset_index(drop=True)
     faculty_df = faculty_df.fillna("").reset_index(drop=True)
+
+    group_df = reverse_dataframe_columns(group_df)
+    faculty_df = reverse_dataframe_columns(faculty_df)
 
     font_name = register_font()
     out_dir = SCRIPT_DIR
@@ -969,6 +979,8 @@ def save_excel(rows: list[dict]) -> Path:
 
         if ordered_cols:
             df = df[ordered_cols]
+
+        df = reverse_dataframe_columns(df)
 
         df.to_excel(output_path, index=False)
     return output_path
